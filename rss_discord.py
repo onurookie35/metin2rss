@@ -197,14 +197,42 @@ def check_rss_feeds():
                     break
             
             if new_entries:
-                # Maksimum 2 entry gönder (en yeniden başlayarak)
-                entries_to_send = new_entries[:MAX_ENTRIES_TO_SEND]
+                print(f"  🆕 {len(new_entries)} adet yeni içerik bulundu")
                 
-                print(f"  🆕 {len(new_entries)} adet yeni içerik bulundu (en fazla {MAX_ENTRIES_TO_SEND} tanesi gönderilecek)")
+                # Aynı saat içinde paylaşılmış mı kontrol et
+                entries_to_send = []
+                if len(new_entries) >= 2:
+                    # İlk iki entry'nin saatlerini karşılaştır
+                    try:
+                        first_entry_time = new_entries[0].get('published_parsed')
+                        second_entry_time = new_entries[1].get('published_parsed')
+                        
+                        if first_entry_time and second_entry_time:
+                            # Saat ve dakika aynı mı kontrol et
+                            first_hour = first_entry_time[3]  # Saat
+                            second_hour = second_entry_time[3]  # Saat
+                            
+                            if first_hour == second_hour:
+                                # Aynı saat içinde paylaşılmış, en fazla 2 tanesini gönder
+                                entries_to_send = new_entries[:MAX_ENTRIES_TO_SEND]
+                                print(f"  ⏰ Aynı saat içinde paylaşılmış, {len(entries_to_send)} tanesi gönderilecek")
+                            else:
+                                # Farklı saatlerde paylaşılmış, sadece en yenisini gönder
+                                entries_to_send = [new_entries[0]]
+                                print(f"  ⏰ Farklı saatlerde paylaşılmış, sadece en yenisi gönderilecek")
+                        else:
+                            # Tarih bilgisi yoksa, sadece en yenisini gönder
+                            entries_to_send = [new_entries[0]]
+                            print(f"  ⏰ Tarih bilgisi bulunamadı, sadece en yenisi gönderilecek")
+                    except Exception as e:
+                        print(f"  ⚠️ Saat karşılaştırma hatası: {e}")
+                        entries_to_send = [new_entries[0]]
+                else:
+                    # Sadece 1 yeni entry var, onu gönder
+                    entries_to_send = new_entries
+                    print(f"  ⏰ Tek yeni entry, gönderiliyor")
                 
-                # new_entries zaten yeni->eski sıralı, aynen kullan (en yeni önce gönderilecek)
-                
-                # Tüm yeni entry'leri gönder
+                # Seçilen entry'leri gönder
                 successfully_sent = []
                 for entry in entries_to_send:
                     entry_id = entry.get('id', entry.get('link', ''))
