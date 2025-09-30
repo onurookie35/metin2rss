@@ -1,1 +1,30 @@
+name: RSS to Discord
 
+on:
+  schedule:
+    # Her 5 dakikada bir çalışır
+    - cron: '*/5 * * * *'
+  workflow_dispatch: # Manuel olarak da çalıştırabilirsiniz
+
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+          
+      - name: Install dependencies
+        run: |
+          pip install feedparser requests
+          
+      - name: Run RSS to Discord script
+        env:
+          WEBHOOK_1: ${{ secrets.WEBHOOK_1 }}
+          WEBHOOK_2: ${{ secrets.WEBHOOK_2 }}
+          WEBHOOK_3: ${{ secrets.WEBHOOK_3 }}
+          WEBHOOK_4: ${{ secrets.WEBHOOK_4 }}
+        run: python rss_discord.py
+        
+      - name: Commit and push if changed
+        run: |
+          git config --global user.email "github-actions[bot]@users.noreply.github.com"
+          git config --global user.name "github-actions[bot]"
+          git add last_entries.json
+          git diff --quiet && git diff --staged --quiet || (git commit -m "Update last RSS entries" && git push)
