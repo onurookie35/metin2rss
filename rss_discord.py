@@ -129,19 +129,20 @@ def check_rss_feeds():
                 print(f"⚠️ {feed_title} için hiç entry bulunamadı")
                 continue
             
-            # Bu RSS kaynağı için daha önce gönderilen entry ID'lerini al
-            sent_entry_ids = last_entries.get(rss_url, [])
+            # Bu RSS kaynağı için son kontrol edilen entry ID'sini al
+            last_entry_id = last_entries.get(rss_url)
             
-            # Eğer liste değilse (eski format), listeye çevir
-            if not isinstance(sent_entry_ids, list):
-                sent_entry_ids = [sent_entry_ids] if sent_entry_ids else []
-            
-            # Yeni entry'leri bul
+            # Yeni entry'leri bul (son kaydedilen entry'ye kadar)
             new_entries = []
             for entry in feed.entries:
                 entry_id = entry.get('id', entry.get('link', ''))
-                if entry_id and entry_id not in sent_entry_ids:
-                    new_entries.append(entry)
+                
+                # Eğer son kaydedilen entry'ye ulaştıysak dur
+                if entry_id == last_entry_id:
+                    break
+                
+                # Bu entry'yi yeni entry'ler listesine ekle
+                new_entries.append(entry)
             
             if new_entries:
                 print(f"🆕 {len(new_entries)} adet yeni içerik bulundu!")
@@ -163,14 +164,9 @@ def check_rss_feeds():
                 
                 # Başarıyla gönderilen entry'leri kaydet
                 if successfully_sent:
-                    # Yeni gönderilen ID'leri mevcut listeye ekle
-                    sent_entry_ids.extend(successfully_sent)
-                    
-                    # Son 50 entry ID'sini sakla (fazla büyümesini önlemek için)
-                    if len(sent_entry_ids) > 50:
-                        sent_entry_ids = sent_entry_ids[-50:]
-                    
-                    last_entries[rss_url] = sent_entry_ids
+                    # En son (en yeni) entry'nin ID'sini kaydet
+                    latest_entry_id = feed.entries[0].get('id', feed.entries[0].get('link', ''))
+                    last_entries[rss_url] = latest_entry_id
                     updated = True
                     
                     print(f"✅ {len(successfully_sent)} adet içerik başarıyla gönderildi")
