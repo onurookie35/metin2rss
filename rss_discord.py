@@ -2,7 +2,8 @@ import feedparser
 import requests
 import json
 import os
-from datetime import datetime
+from datetime import datetime, timedelta
+import time
 
 # RSS Kaynaklarınızı ve Webhook'larınızı buraya ekleyin
 # BURAYA KENDİ RSS URL'LERİNİZİ VE BAŞLIKLARINIZI GİRİN:
@@ -30,6 +31,8 @@ RSS_FEEDS = [
 ]
 
 LAST_ENTRIES_FILE = "last_entries.json"
+MAX_ENTRIES_TO_SEND = 2  # Maksimum gönderilecek entry sayısı
+HOURS_THRESHOLD = 24  # Entry kaç saat içinde yayınlanmış olmalı (24 saat = 1 gün)
 
 def load_last_entries():
     """Son gönderilen RSS entry ID'lerini yükle"""
@@ -43,11 +46,40 @@ def save_last_entries(entries):
     with open(LAST_ENTRIES_FILE, 'w', encoding='utf-8') as f:
         json.dump(entries, f, ensure_ascii=False, indent=2)
 
+def is_entry_recent(entry, hours=HOURS_THRESHOLD):
+    """Entry'nin yayın tarihini kontrol et - belirtilen saat içinde mi?"""
+    try:
+        # Entry'den tarih bilgisini al
+        published_parsed = entry.get('published_parsed')
+        if not published_parsed:
+            # Eğer published_parsed yoksa, string halini parse etmeyi dene
+            return True  # Tarih bulunamazsa güvenli tarafta kalıp gönder
+        
+        # Tuple'ı datetime'a çevir
+        published_date = datetime(*published_parsed[:6])
+        
+        # Şu anki zamanı al
+        now = datetime.now()
+        
+        # Farkı hesapla
+        time_diff = now - published_date
+        
+        # Belirtilen saat içinde mi kontrol et
+        is_recent = time_diff.total_seconds() <= (hours * 3600)
+        
+        if not is_recent:
+            print(f"  ⏰ Eski entry (>{hours} saat önce yayınlanmış): {entry.get('title', 'Başlık yok')}")
+        
+        return is_recent
+        
+    except Exception as e:
+        print(f"  ⚠️ Tarih kontrolü hatası: {e}")
+        return True  # Hata durumunda güvenli tarafta kalıp gönder
+
 def send_to_discord(webhook_url, title, entry):
     """Discord'a mesaj gönder"""
     import re
     from html import unescape
-    import time
     
     # Entry bilgilerini al
     entry_title = entry.get('title', 'Başlık yok')
@@ -93,15 +125,15 @@ def send_to_discord(webhook_url, title, entry):
     try:
         response = requests.post(webhook_url, json=payload)
         if response.status_code == 204:
-            print(f"✅ Mesaj gönderildi: {entry_title}")
+            print(f"  ✅ Mesaj gönderildi: {entry_title}")
             # Discord rate limit için kısa bekleme
             time.sleep(1)
             return True
         else:
-            print(f"❌ Hata: {response.status_code} - {response.text}")
+            print(f"  ❌ Hata: {response.status_code} - {response.text}")
             return False
     except Exception as e:
-        print(f"❌ İstek hatası: {e}")
+        print(f"  ❌ İstek hatası: {e}")
         return False
 
 def check_rss_feeds():
@@ -109,24 +141,40 @@ def check_rss_feeds():
     last_entries = load_last_entries()
     updated = False
     
+    # Tüm aktif RSS URL'lerini topla
+    active_rss_urls = [feed["url"] for feed in RSS_FEEDS]
+    
+    # Artık kullanılmayan RSS feed'lerini sil
+    removed_feeds = []
+    for saved_url in list(last_entries.keys()):
+        if saved_url not in active_rss_urls:
+            removed_feeds.append(saved_url)
+            del last_entries[saved_url]
+            updated = True
+    
+    if removed_feeds:
+        print(f"\n🗑️ Kaldırılan RSS feed'leri: {len(removed_feeds)}")
+        for removed in removed_feeds:
+            print(f"  - {removed}")
+    
     for feed_config in RSS_FEEDS:
         rss_url = feed_config["url"]
         webhook_url = feed_config["webhook"]
         feed_title = feed_config["title"]
         
         if not webhook_url:
-            print(f"⚠️ {feed_title} için webhook bulunamadı, atlanıyor...")
+            print(f"\n⚠️ {feed_title} için webhook bulunamadı, atlanıyor...")
             continue
         
         print(f"\n🔍 {feed_title} kontrol ediliyor...")
-        print(f"RSS URL: {rss_url}")
+        print(f"  RSS URL: {rss_url}")
         
         try:
             # RSS beslemesini parse et
             feed = feedparser.parse(rss_url)
             
             if not feed.entries:
-                print(f"⚠️ {feed_title} için hiç entry bulunamadı")
+                print(f"  ⚠️ Hiç entry bulunamadı")
                 continue
             
             # Bu RSS kaynağı için son kontrol edilen entry ID'sini al
@@ -141,23 +189,29 @@ def check_rss_feeds():
                 if entry_id == last_entry_id:
                     break
                 
-                # Bu entry'yi yeni entry'ler listesine ekle
-                new_entries.append(entry)
+                # Entry'nin tarihini kontrol et - güncel mi?
+                if is_entry_recent(entry):
+                    new_entries.append(entry)
+                else:
+                    # Eski entry'lere ulaştık, aramayı durdur
+                    break
             
             if new_entries:
-                print(f"🆕 {len(new_entries)} adet yeni içerik bulundu!")
+                # Maksimum 2 entry gönder
+                entries_to_send = new_entries[:MAX_ENTRIES_TO_SEND]
+                
+                print(f"  🆕 {len(new_entries)} adet yeni içerik bulundu (en fazla {MAX_ENTRIES_TO_SEND} tanesi gönderilecek)")
                 
                 # Yeni entry'leri eski tarihten yeniye doğru sırala
-                # (RSS feed'ler genelde yeni -> eski sıralıdır, biz tersini istiyoruz)
-                new_entries.reverse()
+                entries_to_send.reverse()
                 
                 # Tüm yeni entry'leri gönder
                 successfully_sent = []
-                for entry in new_entries:
+                for entry in entries_to_send:
                     entry_id = entry.get('id', entry.get('link', ''))
                     entry_title = entry.get('title', 'Başlık yok')
                     
-                    print(f"📤 Gönderiliyor: {entry_title}")
+                    print(f"  📤 Gönderiliyor: {entry_title}")
                     
                     if send_to_discord(webhook_url, feed_title, entry):
                         successfully_sent.append(entry_id)
@@ -169,18 +223,18 @@ def check_rss_feeds():
                     last_entries[rss_url] = latest_entry_id
                     updated = True
                     
-                    print(f"✅ {len(successfully_sent)} adet içerik başarıyla gönderildi")
+                    print(f"  ✅ {len(successfully_sent)} adet içerik başarıyla gönderildi")
             else:
-                print(f"ℹ️ Yeni içerik yok")
+                print(f"  ℹ️ Yeni içerik yok")
                 
         except Exception as e:
-            print(f"❌ RSS işleme hatası ({feed_title}): {e}")
+            print(f"  ❌ RSS işleme hatası: {e}")
             continue
     
     # Eğer herhangi bir güncelleme olduysa kaydet
     if updated:
         save_last_entries(last_entries)
-        print("\n💾 Son entry'ler kaydedildi")
+        print("\n💾 Veriler kaydedildi")
     else:
         print("\n✨ Hiçbir yeni içerik bulunamadı")
 
@@ -188,6 +242,7 @@ if __name__ == "__main__":
     print("=" * 50)
     print("RSS to Discord Bot Başlatılıyor...")
     print(f"Tarih: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
+    print(f"Ayarlar: Maks {MAX_ENTRIES_TO_SEND} entry, Son {HOURS_THRESHOLD} saat içindekiler")
     print("=" * 50)
     check_rss_feeds()
     print("\n" + "=" * 50)
