@@ -45,21 +45,35 @@ def save_last_entries(entries):
 
 def send_to_discord(webhook_url, title, entry):
     """Discord'a mesaj gönder"""
+    import re
+    from html import unescape
+    
     # Entry bilgilerini al
     entry_title = entry.get('title', 'Başlık yok')
     entry_link = entry.get('link', '')
     entry_summary = entry.get('summary', entry.get('description', ''))
     
-    # Özeti kısalt (Discord 2000 karakter limiti var)
+    # HTML etiketlerini temizle
+    entry_summary = re.sub('<.*?>', '', entry_summary)
+    # HTML özel karakterlerini çevir (&nbsp; vb.)
+    entry_summary = unescape(entry_summary)
+    # Fazla boşlukları temizle
+    entry_summary = re.sub(r'\s+', ' ', entry_summary).strip()
+    
+    # Özeti kısalt (Discord 4096 karakter limiti var, ama 500'de keselim)
     if len(entry_summary) > 500:
         entry_summary = entry_summary[:500] + "..."
+    
+    # Eğer özet boşsa, kısa bir mesaj ekle
+    if not entry_summary or len(entry_summary.strip()) == 0:
+        entry_summary = "İçerik detayları için linke tıklayın."
     
     # Yayın tarihini al
     published = entry.get('published', 'Tarih belirtilmemiş')
     
     # Discord embed mesajı oluştur
     embed = {
-        "title": entry_title,
+        "title": entry_title[:256],  # Discord embed title limiti 256 karakter
         "description": entry_summary,
         "url": entry_link,
         "color": 5814783,  # Mavi renk
