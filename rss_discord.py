@@ -197,13 +197,12 @@ def check_rss_feeds():
                     break
             
             if new_entries:
-                # Maksimum 2 entry gönder
+                # Maksimum 2 entry gönder (en yeniden başlayarak)
                 entries_to_send = new_entries[:MAX_ENTRIES_TO_SEND]
                 
                 print(f"  🆕 {len(new_entries)} adet yeni içerik bulundu (en fazla {MAX_ENTRIES_TO_SEND} tanesi gönderilecek)")
                 
-                # Yeni entry'leri eski tarihten yeniye doğru sırala
-                entries_to_send.reverse()
+                # new_entries zaten yeni->eski sıralı, aynen kullan (en yeni önce gönderilecek)
                 
                 # Tüm yeni entry'leri gönder
                 successfully_sent = []
